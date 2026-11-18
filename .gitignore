@@ -1,0 +1,44 @@
+# =====================================================================
+#  GitHub ga yuklanmasligi kerak bo'lgan narsalar (axborot xavfsizligi)
+# =====================================================================
+
+# --- CAS dan yuklangan hisobotlar va tayyor natijalar: HECH QACHON yuklanmaydi ---
+# Papkalar tuzilmasi saqlanadi (.gitkeep), ichidagi hamma fayl ignor qilinadi.
+/file/**
+!/file/**/
+!/file/**/.gitkeep
+/upload/**
+!/upload/**/
+!/upload/**/.gitkeep
+
+# --- Qo'shimcha himoya: ma'lumot formatlari har qanday joyda ---
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.csv.gz
+*.gz
+*.zip
+*.parquet
+*.tmp
+~$*
+
+# --- Lokal sozlamalar va maxfiy ma'lumotlar ---
+/proxy.txt
+*.local
+*.env
+.env*
+*.key
+*.pem
+
+# --- Python / muhit ---
+/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
