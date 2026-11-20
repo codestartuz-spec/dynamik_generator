@@ -1,81 +1,67 @@
 # -*- coding: utf-8 -*-
-"""CAS hisobot fayllaridan kerakli ma'lumotlarni yuklash."""
-from datetime import datetime, timedelta
-
+"""CAS hisobot fayllaridan kerakli ma'lumotlarni yuklash (ustunlar tilga bog'liq emas - schema.py)."""
 import config
-from xlsx_reader import iter_rows, read_header, meter_key, col_to_index
-
-_EXCEL_EPOCH = datetime(1899, 12, 30)
-_TEXT_FORMATS = ("%d/%m/%Y %H:%M:%S", "%d.%m.%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M")
-
-
-def to_datetime(v):
-    """Excel sana raqami yoki matnni datetime ga aylantiradi; bo'lmasa None."""
-    if v is None:
-        return None
-    if isinstance(v, (int, float)):
-        if v <= 0:
-            return None
-        return _EXCEL_EPOCH + timedelta(days=float(v))
-    s = str(v).strip()
-    for fmt in _TEXT_FORMATS:
-        try:
-            return datetime.strptime(s, fmt)
-        except ValueError:
-            pass
-    return None
+import specs
+from schema import open_table, to_datetime, norm
+from xlsx_reader import meter_key, col_to_index
 
 
-def load_direct_meters(path):
-    """DirectMeter.xlsx dagi hisoblagich raqamlari to'plami."""
+def load_direct_meters(path, log=print):
+    """DirectMeter fayldagi hisoblagich raqamlari to'plami."""
     wanted = set()
-    rows = iter_rows(path, wanted)
-    header = dict(read_header(rows, [config.DIRECT_METER_COL]))
-    col = header[config.DIRECT_METER_COL]
+    tbl = open_table(path, specs.DIRECT, wanted)
+    if tbl.note:
+        log("   %s: %s" % (path.name, tbl.note))
+    col = tbl.cols["meter"]
     wanted.add(col)
     result = set()
-    for _rnum, cells in rows:
+    for _rnum, cells in tbl.rows:
         key = meter_key(cells.get(col))
         if key:
             result.add(key)
     return result
 
 
-def _value_after_label(preface, label):
-    """Sarlavha qatorlarida 'Count:' / 'Date:' kabi yozuvdan keyingi qiymatni topadi."""
+def _value_after_label(preface, labels):
+    """
+    Sarlavha qatorlarida 'Count:' / 'Date:' / 'Total:' kabi yozuvdan keyingi qiymatni topadi.
+    labels - bir nechta tildagi variantlar (kichik harfda, boshlanishi bo'yicha solishtiriladi).
+    """
+    if isinstance(labels, str):
+        labels = (labels,)
+    labels = tuple(l.lower() for l in labels)
     for _rnum, cells in preface:
         for col in sorted(cells, key=col_to_index):
             v = cells[col]
-            if isinstance(v, str) and v.strip().lower().startswith(label):
+            if isinstance(v, str) and v.strip().lower().startswith(labels):
                 for c2 in sorted(cells, key=col_to_index):
                     if col_to_index(c2) > col_to_index(col) and not isinstance(cells[c2], str):
                         return cells[c2]
     return None
 
 
+COUNT_LABELS = ("count", "количество", "кол-во", "soni", "miqdori")
+DATE_LABELS = ("date", "дата", "sana")
+TOTAL_LABELS = ("total", "всего", "итого", "jami", "umumiy")
+
+_METER_HEADER_NAMES = specs.METERING.by_key["meter"].aliases | specs.ARCHIVE.by_key["meter"].aliases
+
+
 def load_poll_file(path, progress=None):
     """
     Bitta MeteringDevicesReport fayli: ({raqam: obxod vaqti}, ma'lumot).
-    ma'lumot: declared (faylning o'zidagi 'Count'), rows (haqiqiy qatorlar), date (hisobot sanasi).
+    ma'lumot: declared (faylning o'zidagi 'Count'), rows (haqiqiy qatorlar), date (hisobot sanasi), note.
     """
     wanted = set()
-    preface = []
-    rows = iter_rows(path, wanted)
-    try:
-        header = dict(read_header(rows, [config.METERING_METER_COL, config.METERING_POLL_COL], preface))
-    except ValueError:
-        raise ValueError("%s: MeteringDevicesReport hisobotiga o'xshamaydi ('%s' / '%s' ustunlari topilmadi). "
-                         "Faylni papkadan olib tashlang." % (path.name, config.METERING_METER_COL,
-                                                              config.METERING_POLL_COL))
-    mcol = header[config.METERING_METER_COL]
-    pcol = header[config.METERING_POLL_COL]
+    tbl = open_table(path, specs.METERING, wanted)
+    mcol, pcol = tbl.cols["meter"], tbl.cols["poll"]
     wanted.update([mcol, pcol])
     result = {}
     count = 0
     duplicates = 0
-    for _rnum, cells in rows:
+    for _rnum, cells in tbl.rows:
         key = meter_key(cells.get(mcol))
-        if not key or key == config.METERING_METER_COL:
+        if not key or norm(key) in _METER_HEADER_NAMES:
             continue
         count += 1
         dt = to_datetime(cells.get(pcol))
@@ -87,13 +73,14 @@ def load_poll_file(path, progress=None):
                 result[key] = dt
         if progress and count % 200000 == 0:
             progress(count)
-    declared = _value_after_label(preface, "count")
+    declared = _value_after_label(tbl.preface, COUNT_LABELS)
     info = {
         "declared": int(declared) if isinstance(declared, (int, float)) else None,
         "rows": count,
         "with_poll": len(result),
         "duplicates": duplicates,
-        "date": to_datetime(_value_after_label(preface, "date")),
+        "date": to_datetime(_value_after_label(tbl.preface, DATE_LABELS)),
+        "note": tbl.note,
     }
     return result, info
 
@@ -109,6 +96,8 @@ def load_poll_times(paths, log=print):
     for p in paths:
         log("   %s o'qilmoqda..." % p.name)
         polls, info = load_poll_file(p, progress=lambda n: log("      o'qildi: %d qator" % n))
+        if info["note"]:
+            log("      " + info["note"])
         decl = info["declared"]
         mark = "OK"
         if decl is not None and decl != info["rows"]:
@@ -135,25 +124,32 @@ def load_poll_times(paths, log=print):
 
 
 class ArchiveFile(object):
-    """Bitta Meter Archive Details fayli: tanlangan ustunlar va qatorlar."""
+    """
+    Bitta Meter Archive Details fayli: tanlangan ustunlar va qatorlar.
+    Ustun nomlari chiqishda KANONIK (rus tilidagi) nomlarga keltiriladi, shuning uchun CAS tili o'zgarsa
+    ham natijadagi sarlavhalar bir xil bo'ladi. Tanilmagan qo'shimcha ustunlar o'z nomi bilan saqlanadi.
+    """
 
     def __init__(self, path):
         self.path = path
-        self._rows = iter_rows(path)
-        try:
-            header = read_header(self._rows, [config.ARCHIVE_METER_COL])
-        except ValueError:
-            raise ValueError("%s: Meter Archive Details hisobotiga o'xshamaydi ('%s' ustuni topilmadi). "
-                             "Faylni papkadan olib tashlang." % (path.name, config.ARCHIVE_METER_COL))
-        drop = set(n.strip().casefold() for n in config.DROP_COLUMNS)
-        self.all_columns = [n for n, _c in header]
-        self.columns = [(n, c) for n, c in header if n.strip().casefold() not in drop]
-        self.meter_col = dict(header)[config.ARCHIVE_METER_COL]
+        tbl = open_table(path, specs.ARCHIVE)
+        self.note = tbl.note
+        self._rows = tbl.rows
+        self.meter_col = tbl.cols["meter"]
+        self.all_columns = []
+        self.columns = []
+        for name, letter in tbl.header:
+            f = tbl.letter_field.get(letter)
+            out_name = f.name if f else name
+            self.all_columns.append(out_name)
+            if f is not None and f.drop:
+                continue
+            self.columns.append((out_name, letter))
 
     def rows(self):
         """Har bir qator uchun ({ustun nomi: qiymat}, hisoblagich_kaliti) qaytaradi."""
         for _rnum, cells in self._rows:
             key = meter_key(cells.get(self.meter_col))
-            if not key or key == config.ARCHIVE_METER_COL:
+            if not key or norm(key) in _METER_HEADER_NAMES:
                 continue
             yield {n: cells.get(c) for n, c in self.columns}, key

@@ -11,8 +11,10 @@ UPLOAD_DIR = BASE_DIR / "upload"    # web ilovaga yuklanadigan tayyor fayllar
 # Shu papkalardagi BARCHA .xlsx fayllar olinadi (fayllar soni cheklanmagan: 5 ta ham, 30 ta ham bo'lishi mumkin)
 ARCHIVE_DIR = FILE_DIR / "Meter Archive Details"     # Meter Archive Details hisobotlari
 METERING_DIR = FILE_DIR / "MeteringDevicesReport"    # MeteringDevicesReport bo'laklari
-# Bitta fayl bo'lgan hisobotlar to'g'ridan-to'g'ri FILE_DIR ichida turadi:
-DIRECT_FILE = "DirectMeter.xlsx"
+# Bitta fayl bo'lgan hisobotlar to'g'ridan-to'g'ri FILE_DIR ichida turadi. Ular NOMI SHU SO'Z BILAN
+# BOSHLANADIGAN .xlsx fayl sifatida topiladi (DirectMeter.xlsx, DirectMeter(2).xlsx, DirectMeter (1).xlsx ...).
+# Bir nechta mos fayl bo'lsa eng yangisi (o'zgargan vaqti bo'yicha) olinadi.
+DIRECT_PREFIXES = ["DirectMeter"]
 
 # --- Chiquvchi fayl ---------------------------------------------------------
 OUTPUT_NAME = "Details_Qashqadaryo HETK-{date}.xlsx"
@@ -25,21 +27,13 @@ CSV_EMPTY = ""                              # bo'sh qiymat CSV da bo'sh qoldiril
 CSV_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"   # obxod vaqti formati
 CSV_GZIP_LEVEL = 6
 
-# --- 1-qoida: olib tashlanadigan ustunlar (Meter Archive Details) -----------
-DROP_COLUMNS = [
-    "Баланс ТП",
-    "Версия прошивки",
-    "дата установки",
-    "Дата регистрации",
-    "Статус Реле",
-    "Время обновления",
-]
-
-# --- Ustun nomlari (manba fayllarda) ----------------------------------------
+# --- Ustunlar tilga bog'liq emas ---------------------------------------------
+# Manba fayllardagi ustunlar nomi CAS tiliga qarab o'zgarishi mumkin, shuning uchun ular nomi bilan emas,
+# specs.py dagi tavsif (ko'p tilli sinonimlar + ustun joylashuvi + ma'lumot turi tekshiruvi) bo'yicha topiladi.
+# 1-qoida (olib tashlanadigan 6 ustun: Баланс ТП, Версия прошивки, дата установки, Дата регистрации,
+# Статус Реле, Время обновления) ham specs.ARCHIVE da drop=True bilan belgilangan.
+# Quyidagilar - CHIQISH fayldagi ustun nomlari (manba tilidan qat'i nazar bir xil chiqadi):
 ARCHIVE_METER_COL = "Номер счетчика"
-METERING_METER_COL = "Meter Number"
-METERING_POLL_COL = "Poll time (last)"
-DIRECT_METER_COL = "Meter No."
 
 # --- 2-qoida: yangi ustunlar ------------------------------------------------
 POLL_COL_NAME = "Oxirgi obxod vaqti"
@@ -49,9 +43,14 @@ DIRECT_COL_NAME = "DirectMeter"
 # Hisoblash vaqti: bugungi kun soat REFERENCE_HOUR:00
 REFERENCE_HOUR = 23
 
-# (ustun nomi, pastki chegara kun, yuqori chegara kun)  -> lo < lag <= hi
-# Birinchi oraliq: lag <= 2 kun (48 soat), manfiy (16:00 dan keyingi) ham shunga kiradi.
-# Oxirgisi: lag > 90 kun.
+# Obxodgacha o'tgan vaqt (hisoblash vaqti - oxirgi obxod vaqti) soat/soniya aniqligida olinadi.
+# (ustun nomi, pastki chegara kun, yuqori chegara kun)  ->  pastki*24 soat <= o'tgan vaqt < yuqori*24 soat
+#   48 soat   : o'tgan vaqt < 48 soat            (manfiy, ya'ni hisoblash vaqtidan keyingi obxod ham shunga kiradi)
+#   2-7 kun   : 48 soat <= o'tgan vaqt < 168 soat
+#   7-30 kun  : 168 soat <= o'tgan vaqt < 720 soat
+#   30-90 kun : 720 soat <= o'tgan vaqt < 2160 soat
+#   90+ kun   : o'tgan vaqt >= 2160 soat
+# "Obxod kuni" = o'tgan to'liq sutkalar: 24 soatdan kam -> 0, 24-48 soat -> 1, 48-72 soat -> 2 ...
 BUCKETS = [
     ("48 soat",   None, 2),
     ("2-7 kun",   2,    7),
@@ -59,7 +58,9 @@ BUCKETS = [
     ("30-90 kun", 30,   90),
     ("90+ kun",   90,   None),
 ]
-NO_VALUE = "-"   # obxod vaqti umuman bo'lmasa shu belgi qo'yiladi
+NO_VALUE = "-"   # (ishlatilmaydi: obxod vaqti yo'q bo'lsa katak bo'sh qoladi)
+# "Obxod kuni" ustunida 0 (obxod bugun bo'lgan) ham bo'sh qoldiriladi. 0 ni ko'rsatish uchun False qiling.
+BLANK_ZERO_DAYS = True
 
 # --- Koordinatalar (широта / долгота) tekshiruvi -----------------------------
 REGION_GEOJSON = BASE_DIR / "generator" / "data" / "qashqadaryo.geojson"
@@ -72,15 +73,18 @@ EXCEL_MAX_ROWS = 1_048_576
 # ============================================================================
 # 2-QISM: Area (transformatorlar) hisoboti
 # ============================================================================
-AREA_GLOB = "AreaInformationReport*.xlsx"
-COMMISSIONING_GLOB = "CommissioningStatus*.xlsx"
-ONLINE_GLOB = "Online_Device_Monitroing_Report*.xlsx"   # bir nechta bo'lsa eng yangisi olinadi
+# Fayl nomi shu so'zlar bilan boshlansa bo'ldi (oxirida (1), (2), sana, vaqt... bo'lishi mumkin).
+# Bir nechta mos fayl bo'lsa eng yangisi olinadi.
+AREA_PREFIXES = ["AreaInformationReport"]
+COMMISSIONING_PREFIXES = ["CommissioningStatus"]
+ONLINE_PREFIXES = ["Online_Device_Monitroing_Report", "Online_Device_Monitoring_Report"]
 
 AREA_OUTPUT_NAME = "Area_Qashqadaryo HETK-{date}.xlsx"
 AREA_CSV_NAME = "Area_Qashqadaryo HETK-{date}.csv.gz"
 AREA_SHEET = "Area"
 
-# AreaInformationReport dan qoldiriladigan ustunlar (qolganlari olib tashlanadi)
+# AreaInformationReport dan qoldiriladigan ustunlar (qolganlari olib tashlanadi) - CHIQISH nomlari.
+# (Manba ustunlari specs.AREA da tavsiflangan; tartib va nomlar u yerdagi bilan bir xil bo'lsin.)
 AREA_KEEP_COLUMNS = ["ESP Code", "ESP name", "Substation Code", "Substation",
                      "Feeder Code", "Feeder", "TR Code", "TR", "Manager Name"]
 AREA_ESP_COL = "ESP name"
@@ -88,21 +92,11 @@ AREA_TR_COL = "TR"
 AREA_TRCODE_COL = "TR Code"
 AREA_MANAGER_COL = "Manager Name"
 
-# CommissioningStatus ustunlari
-COMM_ESP_COL = "ESP Name"
-COMM_TR_COL = "TR No."
-COMM_DCU_COL = "DCU No."
-COMM_INSTALLED_COL = "Installed(pcs)"       # konsentratorga iste'molchi biriktirilganligi (>0 -> 1)
-COMM_DAILY_COL = "Daily Data %"
-
-# Online_Device_Monitroing_Report ustunlari
-ONLINE_DCU_COL = "№ Устройства"
-ONLINE_STATUS_COL = "Статус"
-ONLINE_TIME_COL = "Время онлайна/офлайна"
-ONLINE_TYPE_COL = "Тип устройства"
+# Konsentrator (DCU) turi va holati (til farqidan qat'i nazar ishlashi uchun bir nechta yozilishi)
 ONLINE_TYPE_DCU = "DCU"
-ONLINE_TIME_FORMAT = "%d/%m/%Y %H:%M:%S"
-STATUS_OFFLINE = "offline"                   # solishtirish katta-kichik harfga bog'liq emas
+# Holat qiymati shu boshlanishlardan biri bilan boshlansa "offline" hisoblanadi
+# (Offline / Оффлайн / Офлайн / Oflayn ...). Online / Онлайн / Onlayn bunga kirmaydi.
+STATUS_OFFLINE_PREFIXES = ("offline", "оффлайн", "офлайн", "oflayn", "offlayn", "off", "офф", "офл")
 
 # Yangi ustun nomlari
 AREA_DCU_COL = "DCU No."

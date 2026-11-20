@@ -19,14 +19,24 @@ _WIDTHS = {
 }
 
 
+def lag_seconds(poll, ref):
+    """Hisoblash vaqtidan oxirgi obxodgacha o'tgan soniyalar (butun)."""
+    return int((ref - poll).total_seconds())
+
+
+def lag_days(poll, ref):
+    """Obxod kuni: o'tgan to'liq sutkalar (24 soatdan kam -> 0, 24-48 soat -> 1, 48-72 soat -> 2 ...)."""
+    return max(0, lag_seconds(poll, ref) // 86400)
+
+
 def bucket_values(poll, ref):
-    """Obxod vaqtiga ko'ra [48 soat, 2-7, 7-30, 30-90, 90+] qiymatlari (1/0 yoki '-')."""
+    """Obxod vaqtiga ko'ra [48 soat, 2-7, 7-30, 30-90, 90+] qiymatlari (1/0 yoki '-'): pastki*24 soat <= o'tgan < yuqori*24 soat."""
     if poll is None:
         return [config.NO_VALUE] * len(config.BUCKETS)
-    lag = (ref - poll).total_seconds() / 86400.0
+    lag = lag_seconds(poll, ref)
     values = []
     for _name, lo, hi in config.BUCKETS:
-        ok = (lo is None or lag > lo) and (hi is None or lag <= hi)
+        ok = (lo is None or lag >= lo * 86400) and (hi is None or lag < hi * 86400)
         values.append(1 if ok else 0)
     return values
 
@@ -70,6 +80,9 @@ def _csv_val(v):
 
 def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=print, csv_path=None):
     archives = [ArchiveFile(p) for p in archive_paths]
+    for a in archives:
+        if a.note:
+            log("   %s: %s" % (a.path.name, a.note))
     base_cols = [n for n, _c in archives[0].columns]
     for a in archives[1:]:
         if set(n for n, _c in a.columns) != set(base_cols):
@@ -140,36 +153,33 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
                     else:
                         ws.write_string(r, i, str(v))
                 poll = poll_times.get(key)
+                # Quyidagi 8 ustunda faqat mazmunli qiymat yoziladi: "-" va 0 bo'sh katak bo'lib qoladi.
                 if poll is not None:
                     ws.write_datetime(r, n_base, poll, f_date)
                     stats["poll_found"] += 1
                 else:
-                    ws.write_string(r, n_base, config.NO_VALUE, f_center)
                     stats["poll_missing"] += 1
-                if poll is not None:
-                    lag_days = (ref - poll).total_seconds() / 86400.0
-                    ws.write_number(r, n_base + 1, max(0, int(math.floor(lag_days))), f_center)
+                days = lag_days(poll, ref) if poll is not None else None
+                if days is not None and not (days == 0 and config.BLANK_ZERO_DAYS):
+                    ws.write_number(r, n_base + 1, days, f_center)
                 else:
-                    ws.write_string(r, n_base + 1, config.NO_VALUE, f_center)
+                    days = None
                 vals = bucket_values(poll, ref)
                 for j, v in enumerate(vals):
-                    if isinstance(v, int):
-                        ws.write_number(r, n_base + 2 + j, v, f_center)
-                        if v == 1:
-                            stats["buckets"][bucket_names[j]] += 1
-                    else:
-                        ws.write_string(r, n_base + 2 + j, v, f_center)
+                    if v == 1:
+                        ws.write_number(r, n_base + 2 + j, 1, f_center)
+                        stats["buckets"][bucket_names[j]] += 1
                 is_direct = 1 if key in direct_set else 0
                 stats["direct"] += is_direct
-                ws.write_number(r, n_base + 2 + len(bucket_names), is_direct, f_center)
+                if is_direct:
+                    ws.write_number(r, n_base + 2 + len(bucket_names), 1, f_center)
                 if csv_w is not None:
                     csv_w.writerow(
                         [_csv_val(row[name]) for name in base_cols]
                         + [poll.strftime(config.CSV_DATETIME_FORMAT) if poll is not None else config.CSV_EMPTY,
-                           max(0, int(math.floor((ref - poll).total_seconds() / 86400.0))) if poll is not None
-                           else config.CSV_EMPTY]
-                        + [v if isinstance(v, int) else config.CSV_EMPTY for v in vals]
-                        + [is_direct])
+                           days if days is not None else config.CSV_EMPTY]
+                        + [1 if v == 1 else config.CSV_EMPTY for v in vals]
+                        + [1 if is_direct else config.CSV_EMPTY])
                 if r % 100000 == 0:
                     log("     %d qator yozildi" % r)
                 if limit and r >= limit:

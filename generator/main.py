@@ -7,7 +7,7 @@ Details_Qashqadaryo HETK generatori.
 2) MeteringDevicesReport*.xlsx (bo'laklar) dan "Oxirgi obxod vaqti", "Obxod kuni" va 5 ta oraliq ustuni,
    DirectMeter.xlsx dan DirectMeter ustuni qo'shiladi (2-qoida).
 3) Koordinatalar Qashqadaryo hududiga tekshiriladi (o'rni almashganlari to'g'rilanadi, noto'g'rilari bo'sh).
-4) upload\ ga ikkita fayl yoziladi: Details_Qashqadaryo HETK-<sana>.xlsx (ko'rish uchun)
+4) upload\\ ga ikkita fayl yoziladi: Details_Qashqadaryo HETK-<sana>.xlsx (ko'rish uchun)
    va Details_Qashqadaryo HETK-<sana>.csv.gz (web ilovaga yuklash uchun).
 
 Test uchun:  python main.py --limit 5000
@@ -22,7 +22,7 @@ from datetime import datetime
 import area
 import config
 import builder
-from fsutil import list_xlsx
+from fsutil import list_xlsx, latest_report, clear_upload
 from sources import load_direct_meters, load_poll_times
 
 
@@ -38,15 +38,15 @@ def run_details(args, today, out_dir):
 
     archives = list_xlsx(config.ARCHIVE_DIR)
     meterings = list_xlsx(config.METERING_DIR)
-    direct = config.FILE_DIR / config.DIRECT_FILE
+    direct, direct_others = latest_report(config.FILE_DIR, config.DIRECT_PREFIXES)
 
     missing = []
     if not archives:
         missing.append("%s  (papkada .xlsx fayl yo'q)" % config.ARCHIVE_DIR)
     if not meterings:
         missing.append("%s  (papkada .xlsx fayl yo'q)" % config.METERING_DIR)
-    if not direct.exists():
-        missing.append(str(direct))
+    if direct is None:
+        missing.append("%s  (%s*.xlsx topilmadi)" % (config.FILE_DIR, config.DIRECT_PREFIXES[0]))
     if missing:
         log("XATO: quyidagi papka/fayllar topilmadi yoki bo'sh:")
         for m in missing:
@@ -59,8 +59,11 @@ def run_details(args, today, out_dir):
     for p in archives:
         log("   " + p.name)
 
-    log("DirectMeter o'qilmoqda...")
-    direct_set = load_direct_meters(direct)
+    log("DirectMeter o'qilmoqda: %s" % direct.name)
+    if direct_others:
+        log("   DIQQAT: bir nechta DirectMeter fayli bor, eng yangisi olindi (olinmadi: %s)"
+            % ", ".join(o.name for o in direct_others))
+    direct_set = load_direct_meters(direct, log=log)
     log("   DirectMeter: %d ta hisoblagich" % len(direct_set))
 
     log("MeteringDevicesReport fayllari (%d ta) o'qilmoqda: %s" % (len(meterings), config.METERING_DIR))
@@ -102,6 +105,23 @@ def run_details(args, today, out_dir):
 
 
 
+def precheck(only):
+    """Kerakli kiruvchi fayllar bormi? Yo'q bo'lsa upload papkasi o'chirilmasdan oldin xabar beriladi."""
+    problems = []
+    if only in (None, "details"):
+        if not list_xlsx(config.ARCHIVE_DIR):
+            problems.append("%s  (papkada .xlsx fayl yo'q)" % config.ARCHIVE_DIR)
+        if not list_xlsx(config.METERING_DIR):
+            problems.append("%s  (papkada .xlsx fayl yo'q)" % config.METERING_DIR)
+        if latest_report(config.FILE_DIR, config.DIRECT_PREFIXES)[0] is None:
+            problems.append("%s  (%s*.xlsx)" % (config.FILE_DIR, config.DIRECT_PREFIXES[0]))
+    if only in (None, "area"):
+        for prefixes in (config.AREA_PREFIXES, config.COMMISSIONING_PREFIXES, config.ONLINE_PREFIXES):
+            if latest_report(config.FILE_DIR, prefixes)[0] is None:
+                problems.append("%s  (%s*.xlsx)" % (config.FILE_DIR, prefixes[0]))
+    return problems
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -121,6 +141,23 @@ def main():
     mode = os.environ.get("GEN_NETWORK")
     if mode:
         log("Tarmoq rejimi: %s" % mode)
+
+    problems = precheck(args.only)
+    if problems:
+        log("XATO: quyidagi fayl/papkalar topilmadi (upload papkasi tegilmadi):")
+        for m in problems:
+            log("   " + m)
+        return 1
+    if args.out_dir:
+        log("Eslatma: --out-dir berilgan, shuning uchun chiqish papkasi avtomatik tozalanmadi: %s" % out_dir)
+    else:
+        failed = clear_upload(out_dir, args.only, log=log)
+        if failed:
+            log("XATO: quyidagi fayllarni o'chirib bo'lmadi (Excel yoki boshqa dasturda ochiq bo'lishi mumkin):")
+            for p in failed:
+                log("   " + str(p))
+            log("Ularni yoping va qayta ishga tushiring.")
+            return 1
 
     rc = 0
     jobs = []

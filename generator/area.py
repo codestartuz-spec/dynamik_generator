@@ -14,8 +14,11 @@ from datetime import datetime
 import xlsxwriter
 
 import config
-from sources import _value_after_label
-from xlsx_reader import iter_rows, read_header, meter_key
+import specs
+from fsutil import latest_report
+from schema import open_table, to_datetime, norm
+from sources import _value_after_label, TOTAL_LABELS
+from xlsx_reader import meter_key
 
 
 # ---------------------------------------------------------------- ismlar ----
@@ -54,23 +57,22 @@ def normalize_name(v):
 
 
 # ------------------------------------------------------------- o'qish -------
-def _latest(pattern):
-    files = [p for p in config.FILE_DIR.glob(pattern) if not p.name.startswith("~$")]
-    return max(files, key=lambda p: p.stat().st_mtime) if files else None
+def _join_key(esp):
+    """ESP nomini solishtirish uchun: apostrof/harf katta-kichikligi/kirill-lotin farqlari e'tiborga olinmaydi."""
+    return norm(normalize_name(esp) or "")
 
 
-def _open_table(path, required):
-    preface = []
-    rows = iter_rows(path)
-    try:
-        header = read_header(rows, required, preface)
-    except ValueError:
-        raise ValueError("%s: kutilgan hisobotga o'xshamaydi (kerakli ustunlar: %s)" % (path.name, ", ".join(required)))
+def _open_table(path, spec, log=print):
+    """Hisobotni ochadi: (preface, {ichki nom: qiymat} qatorlari generatori)."""
+    tbl = open_table(path, spec)
+    if tbl.note:
+        log("   %s: %s" % (path.name, tbl.note))
+    cols = tbl.cols
 
     def gen():
-        for _rn, cells in rows:
-            yield {n: cells.get(c) for n, c in header}
-    return preface, gen()
+        for _rn, cells in tbl.rows:
+            yield {k: cells.get(c) for k, c in cols.items()}
+    return tbl.preface, gen()
 
 
 def _s(v):
@@ -93,51 +95,47 @@ def _num(v):
     return None
 
 
-def load_area(path):
-    required = [config.AREA_ESP_COL, config.AREA_TR_COL, config.AREA_MANAGER_COL] + config.AREA_KEEP_COLUMNS
-    preface, rows = _open_table(path, sorted(set(required)))
-    declared = _value_after_label(preface, "total")
+def load_area(path, log=print):
+    preface, rows = _open_table(path, specs.AREA, log)
+    declared = _value_after_label(preface, TOTAL_LABELS)
+    fields = specs.AREA.fields
     result = []
     for r in rows:
-        if _s(r.get(config.AREA_TR_COL)) is None and _s(r.get(config.AREA_TRCODE_COL)) is None:
+        if _s(r.get("tr")) is None and _s(r.get("tr_code")) is None:
             continue
-        result.append({c: _s(r.get(c)) for c in config.AREA_KEEP_COLUMNS})
+        result.append({f.name: _s(r.get(f.key)) for f in fields})
     return result, (int(declared) if isinstance(declared, (int, float)) else None)
 
 
-def load_commissioning(path):
+def load_commissioning(path, log=print):
     """{(ESP, TR No.): (dcu, installed, daily)}"""
-    _p, rows = _open_table(path, [config.COMM_ESP_COL, config.COMM_TR_COL, config.COMM_DCU_COL])
+    _p, rows = _open_table(path, specs.COMMISSIONING, log)
     result = {}
     for r in rows:
-        esp, tr = _s(r.get(config.COMM_ESP_COL)), _s(r.get(config.COMM_TR_COL))
+        esp, tr = _s(r.get("esp")), _s(r.get("tr"))
         if not esp or not tr:
             continue
-        result[(esp, tr)] = (meter_key(r.get(config.COMM_DCU_COL)),
-                             _num(r.get(config.COMM_INSTALLED_COL)),
-                             _num(r.get(config.COMM_DAILY_COL)))
+        result[(_join_key(esp), tr)] = (meter_key(r.get("dcu")), _num(r.get("installed")), _num(r.get("daily")))
     return result
 
 
-def load_online(path):
+def is_offline(status):
+    """Holat 'offline' ekanligi (Offline / Оффлайн / Офлайн / Oflayn ...)."""
+    return bool(status) and norm(status).startswith(config.STATUS_OFFLINE_PREFIXES)
+
+
+def load_online(path, log=print):
     """{dcu raqami: (holat, holat vaqti)}"""
-    _p, rows = _open_table(path, [config.ONLINE_DCU_COL, config.ONLINE_STATUS_COL, config.ONLINE_TIME_COL])
+    _p, rows = _open_table(path, specs.ONLINE, log)
     result = {}
     for r in rows:
-        typ = _s(r.get(config.ONLINE_TYPE_COL))
+        typ = _s(r.get("type"))
         if typ is not None and typ.upper() != config.ONLINE_TYPE_DCU:
             continue
-        key = meter_key(r.get(config.ONLINE_DCU_COL))
+        key = meter_key(r.get("dcu"))
         if not key:
             continue
-        t = None
-        raw = _s(r.get(config.ONLINE_TIME_COL))
-        if raw:
-            try:
-                t = datetime.strptime(raw, config.ONLINE_TIME_FORMAT)
-            except ValueError:
-                t = None
-        result[key] = (_s(r.get(config.ONLINE_STATUS_COL)), t)
+        result[key] = (_s(r.get("status")), to_datetime(r.get("time")))
     return result
 
 
@@ -165,7 +163,7 @@ def compute_rows(area_rows, comm, online, today):
              "daily_missing": 0, "managers_blank": 0, "bins": [0] * len(config.DAILY_BINS), "used_comm": set()}
     out = []
     for a in area_rows:
-        esp, tr, code = a[config.AREA_ESP_COL], a[config.AREA_TR_COL], a[config.AREA_TRCODE_COL]
+        esp, tr, code = _join_key(a[config.AREA_ESP_COL]), a[config.AREA_TR_COL], a[config.AREA_TRCODE_COL]
         c = comm.get((esp, tr)) or comm.get((esp, code))
         key = (esp, tr) if (esp, tr) in comm else ((esp, code) if (esp, code) in comm else None)
         base = [a[k] for k in config.AREA_KEEP_COLUMNS]
@@ -184,7 +182,7 @@ def compute_rows(area_rows, comm, online, today):
             stats["dcu"] += 1
             installed, daily = c[1], c[2]
             new[0] = dcu
-            new[1] = (1 if installed > 0 else 0) if installed is not None else None
+            new[1] = 1 if (installed is not None and installed > 0) else None   # 0 -> bo'sh
             new[2] = daily
             o = online.get(dcu)
             if o is None:
@@ -192,7 +190,7 @@ def compute_rows(area_rows, comm, online, today):
             else:
                 status, t = o
                 new[3] = status
-                if status and status.strip().lower() == config.STATUS_OFFLINE:
+                if is_offline(status):
                     new[4] = 1
                     stats["offline"] += 1
                     if t is not None and t < limit_time:
@@ -202,8 +200,8 @@ def compute_rows(area_rows, comm, online, today):
             if daily is None:
                 stats["daily_missing"] += 1
             for i, b in enumerate(bins):
-                new[6 + i] = b
-                if b == 1:
+                if b == 1:                       # 1 bo'lsa yoziladi, 0 va yo'q qiymat bo'sh qoladi
+                    new[6 + i] = 1
                     stats["bins"][i] += 1
         out.append(base + new)
     return out, stats
@@ -280,13 +278,18 @@ def write_outputs(rows, xlsx_path, csv_path):
 # --------------------------------------------------------------- asosiy -----
 def run(today, out_dir, log=print):
     """Area hisobotini tayyorlaydi. 0 - muvaffaqiyatli, 1 - xato."""
-    area_f, comm_f, online_f = (_latest(config.AREA_GLOB), _latest(config.COMMISSIONING_GLOB),
-                                _latest(config.ONLINE_GLOB))
-    missing = [pat for f, pat in ((area_f, config.AREA_GLOB), (comm_f, config.COMMISSIONING_GLOB),
-                                  (online_f, config.ONLINE_GLOB)) if f is None]
+    found = [latest_report(config.FILE_DIR, p) for p in
+             (config.AREA_PREFIXES, config.COMMISSIONING_PREFIXES, config.ONLINE_PREFIXES)]
+    area_f, comm_f, online_f = (f for f, _o in found)
+    missing = [pre[0] + "*.xlsx" for f, pre in zip((area_f, comm_f, online_f),
+               (config.AREA_PREFIXES, config.COMMISSIONING_PREFIXES, config.ONLINE_PREFIXES)) if f is None]
     if missing:
         log("XATO (Area): fayllar topilmadi: " + ", ".join(str(config.FILE_DIR / m) for m in missing))
         return 1
+    for f, others in found:
+        if others:
+            log("   DIQQAT: '%s' kabi bir nechta fayl bor, eng yangisi olindi: %s (olinmadi: %s)"
+                % (f.name, f.name, ", ".join(o.name for o in others)))
     date_s = today.strftime(config.OUTPUT_DATE_FORMAT)
     xlsx_path = out_dir / config.AREA_OUTPUT_NAME.format(date=date_s)
     csv_path = out_dir / config.AREA_CSV_NAME.format(date=date_s)
@@ -294,13 +297,13 @@ def run(today, out_dir, log=print):
     log("=== AREA (transformatorlar) hisoboti ===")
     for f in (area_f, comm_f, online_f):
         log("   " + f.name)
-    area_rows, declared = load_area(area_f)
+    area_rows, declared = load_area(area_f, log)
     log("   Area: %d ta transformator (faylda Total: %s)" % (len(area_rows), declared if declared is not None else "?"))
     if declared is not None and declared != len(area_rows):
         log("   DIQQAT: Total=%d, lekin %d qator o'qildi (fayl to'liq yuklanmagan bo'lishi mumkin)"
             % (declared, len(area_rows)))
-    comm = load_commissioning(comm_f)
-    online = load_online(online_f)
+    comm = load_commissioning(comm_f, log)
+    online = load_online(online_f, log)
     log("   Commissioning: %d, Online (DCU): %d" % (len(comm), len(online)))
 
     rows, st = compute_rows(area_rows, comm, online, today)
