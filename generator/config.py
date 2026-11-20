@@ -40,24 +40,8 @@ POLL_COL_NAME = "Oxirgi obxod vaqti"
 DAYS_COL_NAME = "Obxod kuni"   # joriy kun 16:00 dan obxodgacha o'tgan to'liq kunlar
 DIRECT_COL_NAME = "DirectMeter"
 
-# Hisoblash vaqti: bugungi sana + shu vaqt. Erkin belgilanadi, masalan:
-#   REFERENCE_HOUR = 16        -> 16:00
-#   REFERENCE_HOUR = 9         -> 09:00
-#   REFERENCE_HOUR = "09:30"   -> 09:30   ("S:DD" yoki "SS:DD" ko'rinishida)
-REFERENCE_HOUR = 16
-
-
-def reference_time():
-    """REFERENCE_HOUR dan (soat, daqiqa) ni qaytaradi."""
-    v = REFERENCE_HOUR
-    if isinstance(v, str):
-        parts = v.strip().replace(".", ":").split(":")
-        h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 and parts[1] else 0
-    else:
-        h, m = int(v), int(round((float(v) - int(v)) * 60))
-    if not (0 <= h <= 23 and 0 <= m <= 59):
-        raise ValueError("REFERENCE_HOUR noto'g'ri: %r (0:00 - 23:59 oralig'ida bo'lishi kerak)" % (v,))
-    return h, m
+# Hisoblash vaqti: generatsiya qilingan paytdagi joriy sana/vaqt (REFERENCE_HOUR endi ishlatilmaydi).
+# Test uchun:  python main.py --date 2026-11-20
 
 
 # --- Fayl hajmini kamaytirish: matnli qiymatlar raqamga almashtiriladi (Details, ikkala til uchun) --------
@@ -77,24 +61,25 @@ EQUIPMENT_STATUS_MAP = {
     "Initial": 0, "Начальный": 0,
 }
 
-# Obxodgacha o'tgan vaqt (hisoblash vaqti - oxirgi obxod vaqti) soat/soniya aniqligida olinadi.
-# (ustun nomi, pastki chegara kun, yuqori chegara kun)  ->  pastki*24 soat <= o'tgan vaqt < yuqori*24 soat
-#   48 soat   : o'tgan vaqt < 48 soat            (manfiy, ya'ni hisoblash vaqtidan keyingi obxod ham shunga kiradi)
-#   2-7 kun   : 48 soat <= o'tgan vaqt < 168 soat
-#   7-30 kun  : 168 soat <= o'tgan vaqt < 720 soat
-#   30-90 kun : 720 soat <= o'tgan vaqt < 2160 soat
-#   90+ kun   : o'tgan vaqt >= 2160 soat
-# "Obxod kuni" = o'tgan to'liq sutkalar: 24 soatdan kam -> 0, 24-48 soat -> 1, 48-72 soat -> 2 ...
+# Obxod SANA bo'yicha hisoblanadi (soat e'tiborga olinmaydi): d = (generatsiya sanasi - oxirgi obxod sanasi), kunlarda.
+# (ustun nomi, d pastki, d yuqori)  ->  pastki <= d <= yuqori  (ikkala chegara ham kiradi)
+#   0-2 kun   : d = 0, 1, 2          (kelajakdagi sana ham shu yerga)
+#   2-7 kun   : d = 3 ... 7
+#   7-30 kun  : d = 8 ... 30
+#   30-90 kun : d = 31 ... 90
+#   90+ kun   : d >= 91
+# "Obxod kuni" = d (bugun 0, kecha 1, ...).
 BUCKETS = [
-    ("48 soat",   None, 2),
-    ("2-7 kun",   2,    7),
-    ("7-30 kun",  7,    30),
-    ("30-90 kun", 30,   90),
-    ("90+ kun",   90,   None),
+    ("0-2 kun",   None, 2),
+    ("2-7 kun",   3,    7),
+    ("7-30 kun",  8,    30),
+    ("30-90 kun", 31,   90),
+    ("90+ kun",   91,   None),
 ]
 NO_VALUE = "-"   # (ishlatilmaydi: obxod vaqti yo'q bo'lsa katak bo'sh qoladi)
-# "Obxod kuni" ustunida 0 (obxod bugun bo'lgan) ham bo'sh qoldiriladi. 0 ni ko'rsatish uchun False qiling.
-BLANK_ZERO_DAYS = True
+# "Obxod kuni" ustunida obxod bugun bo'lsa 0 yoziladi; faqat obxod vaqti bo'lmasa katak bo'sh qoladi.
+# (0 ni ham bo'sh qoldirish uchun True qiling.)
+BLANK_ZERO_DAYS = False
 
 # --- Koordinatalar (широта / долгота) tekshiruvi -----------------------------
 REGION_GEOJSON = BASE_DIR / "generator" / "data" / "qashqadaryo.geojson"
@@ -140,8 +125,11 @@ AREA_STATE_COL = "Konsentrator holati"
 AREA_OFFLINE_COL = "Offline"
 AREA_OFFLINE_LONG_COL = "3 kundan ortiq offline"
 
-# "3 kundan ortiq offline": bugun 00:00 dan shuncha soatdan oldin offline bo'lgan
-OFFLINE_LONG_HOURS = 48
+# Offline muddati generatsiya qilingan vaqtga nisbatan (soat bilan) hisoblanadi:
+#   "Offline"                 = 1  -> holati offline va offline bo'lganiga OFFLINE_MIN_HOURS soatdan ortiq bo'lsa
+#   "3 kundan ortiq offline"  = 1  -> offline bo'lganiga OFFLINE_LONG_HOURS soatdan ortiq bo'lsa
+OFFLINE_MIN_HOURS = 24
+OFFLINE_LONG_HOURS = 72
 
 # Daily Data % oraliqlari: (ustun nomi, tur, pastki, yuqori)
 #   "eq": qiymat == pastki;   "range": pastki < qiymat <= yuqori (yuqori None -> cheksiz)

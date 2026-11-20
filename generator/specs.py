@@ -46,7 +46,8 @@ METERING = Spec("MeteringDevicesReport", [
     Field("meter", "Meter Number", 10, ["Meter No.", "Meter No", "Номер счетчика", "№ счетчика",
                                          "Hisoblagich raqami"], "id", required=True),
     Field("poll", "Poll time (last)", 15, ["Last Poll Time", "Poll Time", "Время последнего опроса",
-                                            "Время опроса", "Oxirgi so'rov vaqti", "So'rov vaqti"],
+                                            "Время опроса", "Время опроса (последний)",
+                                            "Oxirgi so'rov vaqti", "So'rov vaqti"],
           "datetime", required=True),
 ], min_cells=12)
 

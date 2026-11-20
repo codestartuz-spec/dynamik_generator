@@ -31,8 +31,7 @@ def log(msg):
 
 
 def run_details(args, today, out_dir):
-    ref_h, ref_m = config.reference_time()
-    ref = today.replace(hour=ref_h, minute=ref_m, second=0, microsecond=0)
+    ref = today   # generatsiya vaqti: obxod kunlari sana bo'yicha hisoblanadi
     date_s = today.strftime(config.OUTPUT_DATE_FORMAT)
     out_path = out_dir / config.OUTPUT_NAME.format(date=date_s)
     csv_path = out_dir / config.CSV_NAME.format(date=date_s)
@@ -55,7 +54,7 @@ def run_details(args, today, out_dir):
         return 1
 
     t0 = time.time()
-    log("Hisoblash vaqti: %s" % ref.strftime("%d.%m.%Y %H:%M"))
+    log("Hisoblash sanasi: %s" % ref.strftime("%d.%m.%Y"))
     log("Meter Archive Details fayllari (%d ta): %s" % (len(archives), config.ARCHIVE_DIR))
     for p in archives:
         log("   " + p.name)

@@ -21,24 +21,19 @@ _WIDTHS = {
 }
 
 
-def lag_seconds(poll, ref):
-    """Hisoblash vaqtidan oxirgi obxodgacha o'tgan soniyalar (butun)."""
-    return int((ref - poll).total_seconds())
-
-
 def lag_days(poll, ref):
-    """Obxod kuni: o'tgan to'liq sutkalar (24 soatdan kam -> 0, 24-48 soat -> 1, 48-72 soat -> 2 ...)."""
-    return max(0, lag_seconds(poll, ref) // 86400)
+    """Obxod kuni: generatsiya sanasi bilan oxirgi obxod sanasi orasidagi kunlar (soat e'tiborga olinmaydi)."""
+    return (ref.date() - poll.date()).days
 
 
 def bucket_values(poll, ref):
-    """Obxod vaqtiga ko'ra [48 soat, 2-7, 7-30, 30-90, 90+] qiymatlari (1/0 yoki '-'): pastki*24 soat <= o'tgan < yuqori*24 soat."""
+    """Sana bo'yicha [0-2, 2-7, 7-30, 30-90, 90+] qiymatlari (1/0 yoki '-'): pastki <= kunlar <= yuqori."""
     if poll is None:
         return [config.NO_VALUE] * len(config.BUCKETS)
-    lag = lag_seconds(poll, ref)
+    d = lag_days(poll, ref)
     values = []
     for _name, lo, hi in config.BUCKETS:
-        ok = (lo is None or lag >= lo * 86400) and (hi is None or lag < hi * 86400)
+        ok = (lo is None or d >= lo) and (hi is None or d <= hi)
         values.append(1 if ok else 0)
     return values
 
@@ -181,7 +176,7 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
                     stats["poll_found"] += 1
                 else:
                     stats["poll_missing"] += 1
-                days = lag_days(poll, ref) if poll is not None else None
+                days = max(0, lag_days(poll, ref)) if poll is not None else None
                 if days is not None and not (days == 0 and config.BLANK_ZERO_DAYS):
                     ws.write_number(r, n_base + 1, days, f_center)
                 else:

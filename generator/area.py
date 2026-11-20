@@ -156,10 +156,8 @@ def daily_bins(value):
 
 def compute_rows(area_rows, comm, online, today):
     """Yakuniy qatorlar ro'yxati: har biri uchun ustunlar tartibida qiymatlar. today - bugun 00:00."""
-    limit_time = today.replace(hour=0, minute=0, second=0, microsecond=0)
-    from datetime import timedelta
-    limit_time = limit_time - timedelta(hours=config.OFFLINE_LONG_HOURS)
-    stats = {"rows": 0, "no_comm": 0, "dcu": 0, "online_missing": 0, "offline": 0, "offline_long": 0,
+    now = today          # generatsiya qilingan vaqt: offline muddati shunga nisbatan hisoblanadi
+    stats = {"rows": 0, "no_comm": 0, "dcu": 0, "online_missing": 0, "offline": 0, "offline_long": 0, "offline_all": 0, "offline_no_time": 0,
              "daily_missing": 0, "managers_blank": 0, "bins": [0] * len(config.DAILY_BINS), "used_comm": set()}
     out = []
     for a in area_rows:
@@ -191,11 +189,17 @@ def compute_rows(area_rows, comm, online, today):
                 status, t = o
                 new[3] = status
                 if is_offline(status):
-                    new[4] = 1
-                    stats["offline"] += 1
-                    if t is not None and t < limit_time:
-                        new[5] = 1
-                        stats["offline_long"] += 1
+                    stats["offline_all"] += 1
+                    if t is None:
+                        stats["offline_no_time"] += 1
+                    else:
+                        hours = (now - t).total_seconds() / 3600.0
+                        if hours > config.OFFLINE_MIN_HOURS:
+                            new[4] = 1
+                            stats["offline"] += 1
+                        if hours > config.OFFLINE_LONG_HOURS:
+                            new[5] = 1
+                            stats["offline_long"] += 1
             bins = daily_bins(daily)
             if daily is None:
                 stats["daily_missing"] += 1
@@ -327,8 +331,11 @@ def run(today, out_dir, log=print):
     log("TAYYOR (Area Excel): %s" % xlsx_path)
     log("TAYYOR (Area CSV+gzip): %s  (%.1f MB)" % (csv_path, size / 1e6))
     log("   Qatorlar: %d, konsentratori bor: %d, ismi bo'sh: %d" % (st["rows"], st["dcu"], st["managers_blank"]))
-    log("   Offline: %d, 3 kundan ortiq offline: %d, Daily Data %% yo'q: %d"
-        % (st["offline"], st["offline_long"], st["daily_missing"]))
+    log("   Offline holatida jami: %d; shundan %d soatdan ortiq (Offline=1): %d, %d soatdan ortiq (3 kundan ortiq offline=1): %d"
+        % (st["offline_all"], config.OFFLINE_MIN_HOURS, st["offline"], config.OFFLINE_LONG_HOURS, st["offline_long"]))
+    if st["offline_no_time"]:
+        log("   DIQQAT: offline holatidagi %d ta konsentratorning vaqti noma'lum (belgilanmadi)" % st["offline_no_time"])
+    log("   Daily Data %% yo'q: %d" % st["daily_missing"])
     for (name, _k, _l, _h), cnt in zip(config.DAILY_BINS, st["bins"]):
         log("   %-14s: %d" % (name, cnt))
     return 0
