@@ -40,8 +40,42 @@ POLL_COL_NAME = "Oxirgi obxod vaqti"
 DAYS_COL_NAME = "Obxod kuni"   # joriy kun 16:00 dan obxodgacha o'tgan to'liq kunlar
 DIRECT_COL_NAME = "DirectMeter"
 
-# Hisoblash vaqti: bugungi kun soat REFERENCE_HOUR:00
-REFERENCE_HOUR = 23
+# Hisoblash vaqti: bugungi sana + shu vaqt. Erkin belgilanadi, masalan:
+#   REFERENCE_HOUR = 16        -> 16:00
+#   REFERENCE_HOUR = 9         -> 09:00
+#   REFERENCE_HOUR = "09:30"   -> 09:30   ("S:DD" yoki "SS:DD" ko'rinishida)
+REFERENCE_HOUR = 16
+
+
+def reference_time():
+    """REFERENCE_HOUR dan (soat, daqiqa) ni qaytaradi."""
+    v = REFERENCE_HOUR
+    if isinstance(v, str):
+        parts = v.strip().replace(".", ":").split(":")
+        h, m = int(parts[0]), int(parts[1]) if len(parts) > 1 and parts[1] else 0
+    else:
+        h, m = int(v), int(round((float(v) - int(v)) * 60))
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise ValueError("REFERENCE_HOUR noto'g'ri: %r (0:00 - 23:59 oralig'ida bo'lishi kerak)" % (v,))
+    return h, m
+
+
+# --- Fayl hajmini kamaytirish: matnli qiymatlar raqamga almashtiriladi (Details, ikkala til uchun) --------
+# Katta-kichik harf va tinish belgilari e'tiborga olinmaydi. Ro'yxatda yo'q qiymat o'zgarishsiz qoladi
+# (va logda ogohlantiriladi) - yangi qiymat chiqsa, shu yerga qo'shing.
+CUSTOMER_TYPE_COL = "Тип потребителя"
+CUSTOMER_TYPE_MAP = {
+    "Industrial": 1, "Юридические": 1,
+    "Residential": 2, "Бытовые": 2,
+    "Balance Meter": 3,
+}
+EQUIPMENT_STATUS_COL = "Статус оборудования"
+EQUIPMENT_STATUS_MAP = {
+    "Commissioned": 1, "Введено в эксплуатацию": 1,
+    "Commissioning": -1, "Запускается в работу": -1,
+    "Installed": 0,
+    "Initial": 0, "Начальный": 0,
+}
 
 # Obxodgacha o'tgan vaqt (hisoblash vaqti - oxirgi obxod vaqti) soat/soniya aniqligida olinadi.
 # (ustun nomi, pastki chegara kun, yuqori chegara kun)  ->  pastki*24 soat <= o'tgan vaqt < yuqori*24 soat

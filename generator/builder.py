@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Birlashgan Details_Qashqadaryo HETK faylini yig'ish va Excel hamda CSV(gzip) ga yozish."""
+import collections
 import csv
 import gzip
 import math
@@ -9,6 +10,7 @@ import xlsxwriter
 
 import config
 from geo import RegionChecker
+from schema import norm
 from sources import ArchiveFile
 
 _WIDTHS = {
@@ -39,6 +41,10 @@ def bucket_values(poll, ref):
         ok = (lo is None or lag >= lo * 86400) and (hi is None or lag < hi * 86400)
         values.append(1 if ok else 0)
     return values
+
+
+def _make_map(mapping):
+    return dict((norm(k), v) for k, v in mapping.items())
 
 
 def to_float(v):
@@ -91,6 +97,12 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
     bucket_names = [b[0] for b in config.BUCKETS]
     header = base_cols + [config.POLL_COL_NAME, config.DAYS_COL_NAME] + bucket_names + [config.DIRECT_COL_NAME]
     region = RegionChecker()
+    value_maps = {}
+    for col, mapping in ((config.CUSTOMER_TYPE_COL, config.CUSTOMER_TYPE_MAP),
+                         (config.EQUIPMENT_STATUS_COL, config.EQUIPMENT_STATUS_MAP)):
+        if col in base_cols:
+            value_maps[col] = _make_map(mapping)
+    unmapped = dict((col, collections.Counter()) for col in value_maps)
     lat_name = config.LAT_COL if config.LAT_COL in base_cols else None
     lon_name = config.LON_COL if config.LON_COL in base_cols else None
 
@@ -123,6 +135,7 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
              "geo": {"none": 0, "ok": 0, "fixed": 0, "blank": 0},
              "buckets": dict((n, 0) for n in bucket_names)}
     stats["files"] = []
+    stats["unmapped"] = unmapped
     esp_name = "ЭСП" if "ЭСП" in base_cols else None
     seen = set()
     n_base = len(base_cols)
@@ -144,11 +157,20 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
                 if lat_name and lon_name:
                     row[lat_name], row[lon_name], gstate = fix_coords(row[lat_name], row[lon_name], region)
                     stats["geo"][gstate] += 1
+                for col, vm in value_maps.items():       # matn -> raqam (fayl hajmini kamaytirish)
+                    raw = row[col]
+                    if raw is None:
+                        continue
+                    code = vm.get(norm(raw))
+                    if code is None:
+                        unmapped[col][str(raw).strip()] += 1
+                    else:
+                        row[col] = code
                 for i, name in enumerate(base_cols):
                     v = row[name]
                     if v is None:
                         continue
-                    if isinstance(v, float):
+                    if isinstance(v, (int, float)):
                         ws.write_number(r, i, v)
                     else:
                         ws.write_string(r, i, str(v))

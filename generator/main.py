@@ -31,7 +31,8 @@ def log(msg):
 
 
 def run_details(args, today, out_dir):
-    ref = today.replace(hour=config.REFERENCE_HOUR, minute=0, second=0, microsecond=0)
+    ref_h, ref_m = config.reference_time()
+    ref = today.replace(hour=ref_h, minute=ref_m, second=0, microsecond=0)
     date_s = today.strftime(config.OUTPUT_DATE_FORMAT)
     out_path = out_dir / config.OUTPUT_NAME.format(date=date_s)
     csv_path = out_dir / config.CSV_NAME.format(date=date_s)
@@ -88,6 +89,10 @@ def run_details(args, today, out_dir):
     for name, cnt in stats["buckets"].items():
         log("   %-10s: %d" % (name, cnt))
     log("   DirectMeter = 1: %d" % stats["direct"])
+    for col, cnt in stats["unmapped"].items():
+        if cnt:
+            log("   DIQQAT: '%s' ustunida ro'yxatda yo'q qiymatlar o'zgarishsiz qoldi: %s"
+                % (col, ", ".join("%s (%d)" % (k, v) for k, v in cnt.most_common())))
     esps = set(e for _n, _r, es in stats["files"] for e in es)
     log("   ESP (tuman) soni: %d - %s" % (len(esps), ", ".join(sorted(esps))))
     if args.limit:
