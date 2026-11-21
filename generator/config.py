@@ -41,7 +41,7 @@ DAYS_COL_NAME = "Obxod kuni"   # joriy kun 16:00 dan obxodgacha o'tgan to'liq ku
 DIRECT_COL_NAME = "DirectMeter"
 
 # Hisoblash vaqti: generatsiya qilingan paytdagi joriy sana/vaqt (REFERENCE_HOUR endi ishlatilmaydi).
-# Test uchun:  python main.py --date 2026-11-20
+# Sana ishga tushganda so'raladi. Savolsiz:  generator.bat --date 20.11.2026
 
 
 # --- Fayl hajmini kamaytirish: matnli qiymatlar raqamga almashtiriladi (Details, ikkala til uchun) --------

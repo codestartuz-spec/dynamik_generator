@@ -17,13 +17,66 @@ import os
 import sys
 import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import area
 import config
 import builder
 from fsutil import list_xlsx, latest_report, clear_upload
 from sources import load_direct_meters, load_poll_times
+
+
+DATE_FORMATS = ("%d.%m.%Y", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%y", "%d-%m-%y", "%d/%m/%y", "%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d")
+
+
+def parse_date(text):
+    """Sanani matndan o'qiydi (KK.OO.YYYY, KK-OO-YYYY, YYYY-MM-DD va h.k.). Bo'lmasa ValueError."""
+    t = (text or "").strip()
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(t, fmt)
+        except ValueError:
+            continue
+    raise ValueError("sana tushunarsiz: '%s'  (masalan: %s)" % (text, datetime.now().strftime("%d.%m.%Y")))
+
+
+def reference_time(day):
+    """
+    Generatsiya sanasidan hisoblash vaqtini yasaydi (Area dagi offline soatlari uchun).
+    Bugun bo'lsa - hozirgi vaqt; o'tgan kun bo'lsa - o'sha kunning oxiri (23:59:59).
+    Obxod kunlari (Details) faqat sanaga qarab hisoblanadi, soat ahamiyatsiz.
+    """
+    now = datetime.now()
+    if day.date() == now.date():
+        return now
+    return day.replace(hour=23, minute=59, second=59)
+
+
+def ask_date():
+    """Sanani foydalanuvchidan so'raydi. Noto'g'ri yoki kelajak sanada qayta so'raydi."""
+    now = datetime.now()
+    print()
+    print("  Qaysi sana bo'yicha generatsiya qilinsin?")
+    print("  Format: KK.OO.YYYY  (masalan: %s). Enter - bugun (%s)."
+          % ((now - timedelta(days=1)).strftime("%d.%m.%Y"), now.strftime("%d.%m.%Y")))
+    while True:
+        try:
+            text = input("  Sanani kiriting: ")
+        except EOFError:
+            raise SystemExit("  Sana kiritilmadi.")
+        if not text.strip():
+            day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            try:
+                day = parse_date(text)
+            except ValueError as e:
+                print("  XATO: %s" % e)
+                continue
+        if day.date() > now.date():
+            print("  XATO: kelajak sanasi bo'lmaydi (%s). Qaytadan kiriting." % day.strftime("%d.%m.%Y"))
+            continue
+        print("  Tanlandi: %s" % day.strftime("%d.%m.%Y"))
+        return day
 
 
 def log(msg):
@@ -133,12 +186,23 @@ def main():
         pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="faqat test: Details da shuncha qator yoziladi")
-    ap.add_argument("--date", help="sana YYYY-MM-DD (default: bugun)")
+    ap.add_argument("--date", help="sana (KK.OO.YYYY yoki YYYY-MM-DD). Berilmasa, ishga tushganda so'raladi")
     ap.add_argument("--out-dir", help="chiqish papkasi (default: upload)")
     ap.add_argument("--only", choices=["details", "area"], help="faqat bitta hisobotni tayyorlash")
     args = ap.parse_args()
 
-    today = datetime.strptime(args.date, "%Y-%m-%d") if args.date else datetime.now()
+    if args.date:
+        try:
+            day = parse_date(args.date)
+        except ValueError as e:
+            ap.error(str(e))
+        if day.date() > datetime.now().date():
+            ap.error("kelajak sanasi bo'lmaydi: %s" % args.date)
+    elif sys.stdin is not None and sys.stdin.isatty():
+        day = ask_date()
+    else:
+        day = datetime.now()      # interaktiv bo'lmagan ishga tushirish (planlovchi va h.k.)
+    today = reference_time(day)
     out_dir = type(config.UPLOAD_DIR)(args.out_dir) if args.out_dir else config.UPLOAD_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
