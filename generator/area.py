@@ -16,6 +16,7 @@ import xlsxwriter
 import config
 import specs
 from fsutil import latest_report
+from progress import Span
 from schema import open_table, to_datetime, norm
 from sources import _value_after_label, TOTAL_LABELS
 from xlsx_reader import meter_key
@@ -280,8 +281,10 @@ def write_outputs(rows, xlsx_path, csv_path):
 
 
 # --------------------------------------------------------------- asosiy -----
-def run(today, out_dir, log=print):
+def run(today, out_dir, log=print, span=None):
     """Area hisobotini tayyorlaydi. 0 - muvaffaqiyatli, 1 - xato."""
+    span = span or Span()
+    span.at(0.02, "Area: fayllar tekshirilmoqda")
     found = [latest_report(config.FILE_DIR, p) for p in
              (config.AREA_PREFIXES, config.COMMISSIONING_PREFIXES, config.ONLINE_PREFIXES)]
     area_f, comm_f, online_f = (f for f, _o in found)
@@ -301,16 +304,21 @@ def run(today, out_dir, log=print):
     log("=== AREA (transformatorlar) hisoboti ===")
     for f in (area_f, comm_f, online_f):
         log("   " + f.name)
+    span.at(0.05, "Area: transformatorlar o'qilmoqda")
     area_rows, declared = load_area(area_f, log)
+    span.at(0.45, "Area: Commissioning o'qilmoqda")
     log("   Area: %d ta transformator (faylda Total: %s)" % (len(area_rows), declared if declared is not None else "?"))
     if declared is not None and declared != len(area_rows):
         log("   DIQQAT: Total=%d, lekin %d qator o'qildi (fayl to'liq yuklanmagan bo'lishi mumkin)"
             % (declared, len(area_rows)))
     comm = load_commissioning(comm_f, log)
+    span.at(0.6, "Area: Online holat o'qilmoqda")
     online = load_online(online_f, log)
+    span.at(0.7, "Area: hisoblanmoqda")
     log("   Commissioning: %d, Online (DCU): %d" % (len(comm), len(online)))
 
     rows, st = compute_rows(area_rows, comm, online, today)
+    span.at(0.8, "Area: fayllar yozilmoqda")
     if st["no_comm"]:
         log("   DIQQAT: Commissioning da topilmagan transformatorlar: %d" % st["no_comm"])
     comm_unused = len(comm) - len(st["used_comm"])
@@ -328,6 +336,7 @@ def run(today, out_dir, log=print):
     except PermissionError:
         log("XATO (Area): faylni yozib bo'lmadi. Excel da ochiq bo'lsa yoping: %s" % xlsx_path)
         return 1
+    span.at(1.0, "Area tayyor")
     log("TAYYOR (Area Excel): %s" % xlsx_path)
     log("TAYYOR (Area CSV+gzip): %s  (%.1f MB)" % (csv_path, size / 1e6))
     log("   Qatorlar: %d, konsentratori bor: %d, ismi bo'sh: %d" % (st["rows"], st["dcu"], st["managers_blank"]))

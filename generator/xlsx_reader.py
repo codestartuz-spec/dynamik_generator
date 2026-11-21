@@ -90,7 +90,12 @@ def iter_rows(path, wanted=None):
     `wanted` - ustun harflari to'plami (o'zgaruvchan): bo'sh bo'lsa hamma ustun o'qiladi,
     to'ldirilsa faqat shu ustunlar o'qiladi (tezroq).
     """
-    with zipfile.ZipFile(str(path)) as z:
+    try:
+        zf = zipfile.ZipFile(str(path))
+    except zipfile.BadZipFile:
+        raise ValueError("%s: fayl buzilgan yoki to'liq yuklanmagan (haqiqiy .xlsx emas). "
+                         "CAS dan qaytadan yuklab oling" % getattr(path, "name", path))
+    with zf as z:
         shared = _load_shared_strings(z)
         sheet_path = _first_sheet_path(z)
         decoder = codecs.getincrementaldecoder("utf-8")()

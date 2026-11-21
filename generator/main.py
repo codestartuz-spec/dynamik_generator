@@ -16,12 +16,14 @@ import argparse
 import os
 import sys
 import time
+import traceback
 import zipfile
 from datetime import datetime, timedelta
 
 import area
 import config
 import builder
+import progress
 from fsutil import list_xlsx, latest_report, clear_upload
 from sources import load_direct_meters, load_poll_times
 
@@ -83,7 +85,8 @@ def log(msg):
     print("[%s] %s" % (datetime.now().strftime("%H:%M:%S"), msg), flush=True)
 
 
-def run_details(args, today, out_dir):
+def run_details(args, today, out_dir, span=None):
+    span = span or progress.Span()
     ref = today   # generatsiya vaqti: obxod kunlari sana bo'yicha hisoblanadi
     date_s = today.strftime(config.OUTPUT_DATE_FORMAT)
     out_path = out_dir / config.OUTPUT_NAME.format(date=date_s)
@@ -112,6 +115,7 @@ def run_details(args, today, out_dir):
     for p in archives:
         log("   " + p.name)
 
+    span.at(0.0, "DirectMeter o'qilmoqda")
     log("DirectMeter o'qilmoqda: %s" % direct.name)
     if direct_others:
         log("   DIQQAT: bir nechta DirectMeter fayli bor, eng yangisi olindi (olinmadi: %s)"
@@ -119,9 +123,10 @@ def run_details(args, today, out_dir):
     direct_set = load_direct_meters(direct, log=log)
     log("   DirectMeter: %d ta hisoblagich" % len(direct_set))
 
+    span.at(0.03, "Metering o'qilmoqda")
     log("MeteringDevicesReport fayllari (%d ta) o'qilmoqda: %s" % (len(meterings), config.METERING_DIR))
     log("   (bir necha daqiqa ketishi mumkin)")
-    poll_times, warns = load_poll_times(meterings, log=log)
+    poll_times, warns = load_poll_times(meterings, log=log, span=span.sub(0.03, 0.42))
     log("   Metering jami: %d ta hisoblagich" % len(poll_times))
     for w in warns:
         log("   DIQQAT: " + w)
@@ -129,7 +134,8 @@ def run_details(args, today, out_dir):
     log("Birlashgan fayl yig'ilmoqda -> %s va %s" % (out_path.name, csv_path.name))
     try:
         stats = builder.build(archives, poll_times, direct_set, out_path, ref,
-                              limit=args.limit or None, log=log, csv_path=csv_path)
+                              limit=args.limit or None, log=log, csv_path=csv_path,
+                              span=span.sub(0.42, 1.0))
     except PermissionError:
         log("XATO: faylni yozib bo'lmadi. Excel da ochiq bo'lsa yoping: %s" % out_path)
         return 1
@@ -179,7 +185,14 @@ def precheck(only):
     return problems
 
 
-def main():
+def main(argv=None):
+    ap_pre = argparse.ArgumentParser(add_help=False)
+    ap_pre.add_argument("--log-file")
+    pre, _rest = ap_pre.parse_known_args(argv)
+    if pre.log_file:       # oyna ilovasi uchun: jurnal faylga yoziladi (stdout .exe da ishonchsiz)
+        f = open(pre.log_file, "a", encoding="utf-8", buffering=1)
+        sys.stdout = f
+        sys.stderr = f
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
@@ -188,8 +201,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="faqat test: Details da shuncha qator yoziladi")
     ap.add_argument("--date", help="sana (KK.OO.YYYY yoki YYYY-MM-DD). Berilmasa, ishga tushganda so'raladi")
     ap.add_argument("--out-dir", help="chiqish papkasi (default: upload)")
+    ap.add_argument("--log-file", help="jurnalni shu faylga yozish (oyna ilovasi ishlatadi)")
     ap.add_argument("--only", choices=["details", "area"], help="faqat bitta hisobotni tayyorlash")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.date:
         try:
@@ -210,6 +224,7 @@ def main():
     if mode:
         log("Tarmoq rejimi: %s" % mode)
 
+    progress.emit(0.5, "Fayllar tekshirilmoqda")
     problems = precheck(args.only)
     if problems:
         log("XATO: quyidagi fayl/papkalar topilmadi (upload papkasi tegilmadi):")
@@ -226,19 +241,30 @@ def main():
                 log("   " + str(p))
             log("Ularni yoping va qayta ishga tushiring.")
             return 1
+    progress.emit(3, "Tayyorlanmoqda")
 
+    both = args.only is None
     rc = 0
     jobs = []
     if args.only in (None, "area"):
-        jobs.append(lambda: area.run(today, out_dir, log=log))
+        a_span = progress.Span(3, 20) if both else progress.Span(3, 100)
+        jobs.append(lambda: area.run(today, out_dir, log=log, span=a_span))
     if args.only in (None, "details"):
-        jobs.append(lambda: run_details(args, today, out_dir))
+        d_span = progress.Span(20, 100) if both else progress.Span(3, 100)
+        jobs.append(lambda: run_details(args, today, out_dir, span=d_span))
     for job in jobs:
         try:
             rc |= job()
         except (ValueError, zipfile.BadZipFile) as e:
             log("XATO: %s" % e)
             rc |= 1
+        except Exception as e:
+            log("XATO: kutilmagan xato: %s: %s" % (type(e).__name__, e))
+            traceback.print_exc()
+            rc |= 1
+    if rc == 0:
+        progress.emit(100, "Tayyor")
+        progress.done()
     return rc
 
 

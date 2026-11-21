@@ -2,6 +2,7 @@
 """CAS hisobot fayllaridan kerakli ma'lumotlarni yuklash (ustunlar tilga bog'liq emas - schema.py)."""
 import config
 import specs
+from progress import files_fraction
 from schema import open_table, to_datetime, norm
 from xlsx_reader import meter_key, col_to_index
 
@@ -71,7 +72,7 @@ def load_poll_file(path, progress=None):
             old = result.get(key)
             if old is None or dt > old:
                 result[key] = dt
-        if progress and count % 200000 == 0:
+        if progress and count % 50000 == 0:
             progress(count)
     declared = _value_after_label(tbl.preface, COUNT_LABELS)
     info = {
@@ -85,7 +86,7 @@ def load_poll_file(path, progress=None):
     return result, info
 
 
-def load_poll_times(paths, log=print):
+def load_poll_times(paths, log=print, span=None):
     """
     Bir nechta MeteringDevicesReport bo'laklarini o'qiydi, tekshiradi va birlashtiradi.
     Qaytaradi: ({raqam: obxod vaqti}, [ogohlantirishlar]).
@@ -93,9 +94,21 @@ def load_poll_times(paths, log=print):
     merged = {}
     warnings = []
     seen_rows = 0
-    for p in paths:
+    prev_rows = []
+    total = len(paths)
+    for idx, p in enumerate(paths):
         log("   %s o'qilmoqda..." % p.name)
-        polls, info = load_poll_file(p, progress=lambda n: log("      o'qildi: %d qator" % n))
+        if span:
+            span.at(files_fraction(idx, total, 0, prev_rows), "Metering o'qilmoqda (%d/%d)" % (idx + 1, total))
+
+        def _progress(n, idx=idx):
+            if n % 200000 == 0:
+                log("      o'qildi: %d qator" % n)
+            if span:
+                span.at(files_fraction(idx, total, n, prev_rows), "Metering o'qilmoqda (%d/%d)" % (idx + 1, total))
+
+        polls, info = load_poll_file(p, progress=_progress)
+        prev_rows.append(info["rows"])
         if info["note"]:
             log("      " + info["note"])
         decl = info["declared"]
@@ -120,6 +133,8 @@ def load_poll_times(paths, log=print):
             warnings.append("%s: oldingi bo'laklar bilan %d ta hisoblagich takrorlangan (yangisi olindi)"
                             % (p.name, overlap))
         seen_rows += info["rows"]
+    if span:
+        span.at(1.0, "Metering o'qildi (%d/%d)" % (total, total))
     return merged, warnings
 
 

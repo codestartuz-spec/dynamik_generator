@@ -33,6 +33,7 @@
 
 # --- Python / muhit ---
 /.venv/
+/.venv_oyna/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -42,3 +43,11 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# --- Oynali ilova: yig'ilgan .exe, vaqtinchalik va jurnal fayllar ---
+/CAS Generator/
+/build_tmp/
+/logs/
+/_shots/
+*.spec
+*.exe

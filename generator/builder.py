@@ -10,6 +10,7 @@ import xlsxwriter
 
 import config
 from geo import RegionChecker
+from progress import files_fraction
 from schema import norm
 from sources import ArchiveFile
 
@@ -79,7 +80,7 @@ def _csv_val(v):
     return v
 
 
-def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=print, csv_path=None):
+def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=print, csv_path=None, span=None):
     archives = [ArchiveFile(p) for p in archive_paths]
     for a in archives:
         if a.note:
@@ -135,9 +136,14 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
     seen = set()
     n_base = len(base_cols)
     r = 0
+    prev_rows = []
+    n_files = len(archives)
     try:
-        for a in archives:
+        for a_idx, a in enumerate(archives):
             f_rows, f_esp = 0, set()
+            stage = "Details yig'ilmoqda (%d/%d fayl)" % (a_idx + 1, n_files)
+            if span:
+                span.at(0.97 * files_fraction(a_idx, n_files, 0, prev_rows), stage)
             for row, key in a.rows():
                 f_rows += 1
                 if esp_name:
@@ -199,8 +205,11 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
                         + [1 if is_direct else config.CSV_EMPTY])
                 if r % 100000 == 0:
                     log("     %d qator yozildi" % r)
+                if span and f_rows % 20000 == 0:
+                    span.at(0.97 * files_fraction(a_idx, n_files, f_rows, prev_rows), stage)
                 if limit and r >= limit:
                     break
+            prev_rows.append(f_rows)
             stats["files"].append((a.path.name, f_rows, sorted(f_esp)))
             log("  -> %s: %d qator, ESP: %s" % (a.path.name, f_rows, ", ".join(sorted(f_esp)) or "?"))
             if limit and r >= limit:
@@ -208,6 +217,8 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
         stats["metering_not_in_archive"] = sum(1 for k in poll_times if k not in seen)
         ws.freeze_panes(1, 0)
         ws.autofilter(0, 0, r, len(header) - 1)
+        if span:
+            span.at(0.98, "Excel fayli yopilmoqda")
         wb.close()
         if csv_file is not None:
             csv_file.close()
@@ -233,6 +244,8 @@ def build(archive_paths, poll_times, direct_set, out_path, ref, limit=None, log=
         stats["csv_size"] = os.path.getsize(str(csv_path))
         log("  CSV tayyor: %s" % csv_path)
     os.replace(tmp_path, str(out_path))
+    if span:
+        span.at(1.0, "Details tayyor")
     stats["rows"] = r
     stats["columns"] = header
     return stats

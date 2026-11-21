@@ -1,9 +1,28 @@
 # -*- coding: utf-8 -*-
 """Loyiha sozlamalari: papkalar, fayl nomlari, qoidalar."""
+import os
+import sys
 from pathlib import Path
 
+
+def _base_dir():
+    """Loyiha papkasi (file\\ va upload\\ shu yerda). .exe bo'lsa - exe yonidagi (yoki bir pog'ona yuqoridagi) papka."""
+    env = os.environ.get("CAS_BASE_DIR")
+    if env:
+        return Path(env)
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        for cand in (exe_dir, exe_dir.parent):
+            if (cand / "file").is_dir() or (cand / "upload").is_dir():
+                return cand
+        return exe_dir
+    return Path(__file__).resolve().parent.parent
+
+
 # C:\PythonLoyhalar\Report\Generator
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = _base_dir()
+# Resurs fayllari (geojson): .exe ichida PyInstaller ochgan papkada, aks holda generator\ yonida
+RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 FILE_DIR = BASE_DIR / "file"        # CAS dan yuklab olingan hisobotlar
 UPLOAD_DIR = BASE_DIR / "upload"    # web ilovaga yuklanadigan tayyor fayllar
 
@@ -82,7 +101,7 @@ NO_VALUE = "-"   # (ishlatilmaydi: obxod vaqti yo'q bo'lsa katak bo'sh qoladi)
 BLANK_ZERO_DAYS = False
 
 # --- Koordinatalar (широта / долгота) tekshiruvi -----------------------------
-REGION_GEOJSON = BASE_DIR / "generator" / "data" / "qashqadaryo.geojson"
+REGION_GEOJSON = RESOURCE_DIR / "data" / "qashqadaryo.geojson"
 LAT_COL = "широта"
 LON_COL = "долгота"
 BORDER_TOLERANCE_KM = 2.0   # chegara yaqinidagi nuqtalarga yo'l qo'yiladigan xato (km)
